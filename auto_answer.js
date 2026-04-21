@@ -1484,15 +1484,7 @@ function createControlPanel() {
                         <button id="refreshQuestionPreview" class="pta-button--accent" type="button">刷新题面内容</button>
                         <button id="manualClearQuestion" class="pta-button" type="button">清空题目区域</button>
                         <button id="copyQuestionPreview" class="pta-button--accent" type="button">复制题面内容</button>
-                        <button id="manualSimulateInput" class="pta-button--primary" type="button">粘贴内容并输入</button>
                     </div>
-                </div>
-
-                <div class="pta-section">
-                    <div class="pta-section__title">
-                        <span>提取题面</span>
-                    </div>
-                    <pre id="questionPreviewText" class="pta-preview"></pre>
                 </div>
 
                 <div class="pta-section">
@@ -1500,6 +1492,7 @@ function createControlPanel() {
                         <span>粘贴内容</span>
                     </div>
                     <textarea id="manualAnswerInput" class="pta-input pta-textarea" placeholder="把答案代码或 AI 返回的 JSON 粘贴到这里，然后点击“粘贴内容并输入”"></textarea>
+                    <button id="manualSimulateInput" class="pta-button--primary pta-button--full" type="button" style="margin-top: 10px;">粘贴内容并输入</button>
                 </div>
             </div>
 
