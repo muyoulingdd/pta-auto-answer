@@ -32,10 +32,10 @@
 
     function buildSystemPrompt(language) {
         const promptMap = {
-            C: '你是专业的解题助手。请根据用户提供的题目内容输出可直接提交的C语言代码。必须优先服从题面文字中的明确要求，样例仅用于辅助理解，不能覆盖文字约束。',
-            Java: '你是专业的解题助手。请根据用户提供的题目内容输出可直接提交的Java代码。必须优先服从题面文字中的明确要求，样例仅用于辅助理解，不能覆盖文字约束。',
-            Python: '你是专业的解题助手。请根据用户提供的题目内容输出可直接提交的Python代码。必须优先服从题面文字中的明确要求，样例仅用于辅助理解，不能覆盖文字约束。',
-            SQL: '你是专业的解题助手。请根据用户提供的题目内容输出可直接提交的SQL答案。必须优先服从题面文字中的明确要求；如果题面明确给出了 CREATE VIEW、CREATE TABLE、字段名、列顺序、别名、输出结构或其他 SQL 结构要求，必须严格按文字要求生成。样例和图片只用于辅助理解，不能覆盖题面文字中的 SQL 结构要求。'
+            C: '你是解题助手。输出可直接提交的C语言代码。',
+            Java: '你是解题助手。输出可直接提交的Java代码。',
+            Python: '你是解题助手。输出可直接提交的Python代码。',
+            SQL: '你是解题助手。输出可直接提交的SQL答案。'
         };
 
         const formatRequirement = '你必须只返回一个合法 JSON 对象，格式严格为 {"code":"..."}。code 字段必须保留完整的多行代码格式：需要换行的地方必须使用 \\n，缩进必须保留空格或 \\t，绝对不要把整段代码压缩成一行。除了这个 JSON 对象外，不要输出 Markdown，不要输出解释，不要输出额外字段。';
@@ -44,17 +44,53 @@
     }
 
     function buildUserPrompt(questionText, language) {
-        return `请解答下面这道${language}题目，并严格按要求返回。\n要求：返回的 JSON 中 code 字段必须是保留换行和缩进的完整代码字符串，不能输出单行压缩代码。\n注意：题面文字中的硬性要求优先级最高；样例输入输出、图片、示意图只能辅助理解，不能覆盖题面文字中的明确约束。\n题目如下：\n${questionText}`;
+        return `请解答这道${language}题目并按要求返回。\n题目如下：\n${questionText}`;
     }
 
     function buildUserMultimodalPrompt(questionText, language, mediaSummary = {}) {
         const imageCount = mediaSummary.imageCount || 0;
         const screenshotCount = mediaSummary.screenshotCount || 0;
         const mediaHint = imageCount || screenshotCount
-            ? `\n补充信息：本次还附带了${imageCount}张题面图片和${screenshotCount}张区域截图，请结合图片内容一起解题。`
+            ? '\n已附带题面图片和区域截图。'
             : '';
 
-        return `请解答下面这道${language}题目，并严格按要求返回。\n要求：返回的 JSON 中 code 字段必须是保留换行和缩进的完整代码字符串，不能输出单行压缩代码。\n注意：题面文字中的硬性要求优先级最高；样例输入输出、图片、示意图只能辅助理解，不能覆盖题面文字中的明确约束。${mediaHint}\n题目如下：\n${questionText}`;
+        return `请解答这道${language}题目并按要求返回。${mediaHint}\n题目如下：\n${questionText}`;
+    }
+
+    function splitTableLikeCells(line) {
+        return (line || '')
+            .split(/\t+| {2,}/)
+            .map((cell) => normalizeQuestionSectionText(cell))
+            .filter(Boolean);
+    }
+
+    function extractOutputHeaderHints(questionText) {
+        const lines = normalizeQuestionSectionText(questionText).split('\n');
+        const hints = [];
+        const seen = new Set();
+
+        for (let i = 0; i < lines.length; i += 1) {
+            const line = normalizeQuestionSectionText(lines[i]);
+            if (!/输出样例|输出示例/.test(line)) continue;
+
+            for (let j = i + 1; j < Math.min(lines.length, i + 8); j += 1) {
+                const candidateLine = normalizeQuestionSectionText(lines[j]);
+                if (!candidateLine) continue;
+                if (/^(输入样例|输入示例|样例说明|说明|例如)[:：]?$/.test(candidateLine)) continue;
+
+                const cells = splitTableLikeCells(candidateLine);
+                if (cells.length >= 2) {
+                    const hint = cells.join(' | ');
+                    if (!seen.has(hint)) {
+                        seen.add(hint);
+                        hints.push(hint);
+                    }
+                    break;
+                }
+            }
+        }
+
+        return hints;
     }
 
     function stripCodeFence(answer) {
@@ -284,6 +320,199 @@
         return texts.join('\n\n').trim();
     }
 
+    function splitNormalizedLines(text) {
+        return normalizeQuestionSectionText(text)
+            .split('\n')
+            .map((line) => normalizeQuestionSectionText(line))
+            .filter(Boolean);
+    }
+
+    function inferMediaLabelFromSections(entries = []) {
+        const lines = entries.flatMap((entry) => splitNormalizedLines(entry?.text));
+        const priorityPatterns = [
+            /(?:^|\s)([A-Za-z_][A-Za-z0-9_]{0,40}表)(?:\s|:|：|$)/,
+            /(?:^|\s)(输入样例|输出样例|表样例|示例数据|样例数据)(?:\s|:|：|$)/,
+            /(?:^|\s)([^\n：:]{1,20}(?:样例|示例|结果|输出|输入|数据表|表结构))(?:\s|:|：|$)/
+        ];
+
+        for (const pattern of priorityPatterns) {
+            for (const line of lines) {
+                const match = line.match(pattern);
+                if (match?.[1]) {
+                    return match[1].trim();
+                }
+            }
+        }
+
+        return lines[0] || '题面图示';
+    }
+
+    function buildMediaContextText(entries = [], fallbackLabel = '题面图示') {
+        const allLines = entries.flatMap((entry) => splitNormalizedLines(entry?.text));
+        const preferredLines = [];
+        const seen = new Set();
+        const preferredPattern = /(表|样例|示例|输入|输出|字段|列|结构|说明|例如|结果|数据)/;
+
+        allLines.forEach((line) => {
+            if (!preferredPattern.test(line)) return;
+            if (seen.has(line)) return;
+            seen.add(line);
+            preferredLines.push(line);
+        });
+
+        if (preferredLines.length === 0) {
+            allLines.forEach((line) => {
+                if (seen.has(line)) return;
+                seen.add(line);
+                preferredLines.push(line);
+            });
+        }
+
+        const clippedLines = preferredLines.slice(0, 6);
+        const merged = clippedLines.join('\n').slice(0, 320).trim();
+
+        return merged || fallbackLabel;
+    }
+
+    function isMediaRichElement(element) {
+        if (!element || !(element instanceof Element) || !isElementVisible(element)) return false;
+        if (element.matches('img, table, canvas, svg')) return true;
+        return !!element.querySelector('img, table, canvas, svg');
+    }
+
+    function isSampleLabelElement(element) {
+        if (!element || !(element instanceof Element) || !isElementVisible(element)) return false;
+        const text = normalizeQuestionSectionText(element.textContent);
+        if (!text || text.length > 30) return false;
+        return /(输出样例|输入样例|表样例|样例输出|样例输入|示例输出|示例输入)/.test(text);
+    }
+
+    function getNextVisibleSiblings(element, limit = 6) {
+        const siblings = [];
+        let current = element?.nextElementSibling || null;
+
+        while (current && siblings.length < limit) {
+            if (isElementVisible(current)) {
+                siblings.push(current);
+            }
+            current = current.nextElementSibling;
+        }
+
+        return siblings;
+    }
+
+    function resolveSampleCaptureElement(labelElement, rootElement) {
+        if (!labelElement || !rootElement) return null;
+
+        const directSiblings = getNextVisibleSiblings(labelElement, 6);
+        const directMatch = directSiblings.find((element) => isMediaRichElement(element));
+        if (directMatch) return directMatch;
+
+        const parentSiblings = getNextVisibleSiblings(labelElement.parentElement, 6);
+        const parentMatch = parentSiblings.find((element) => isMediaRichElement(element));
+        if (parentMatch) return parentMatch;
+
+        const nearbyChildren = Array.from((labelElement.parentElement || rootElement).children || [])
+            .filter((element) => element !== labelElement && isMediaRichElement(element));
+        if (nearbyChildren.length > 0) return nearbyChildren[0];
+
+        return null;
+    }
+
+    function resolveSampleCaptureContainer(labelElement, mediaElement, rootElement) {
+        if (!labelElement || !mediaElement) return mediaElement;
+
+        const candidateAncestors = [];
+        let current = mediaElement;
+
+        while (current && current !== rootElement && current instanceof Element) {
+            candidateAncestors.push(current);
+            current = current.parentElement;
+        }
+
+        for (const candidate of candidateAncestors) {
+            if (!candidate.contains(labelElement)) continue;
+            if (!isElementVisible(candidate)) continue;
+
+            const rect = candidate.getBoundingClientRect();
+            const textLength = normalizeQuestionSectionText(candidate.textContent).length;
+
+            if (rect.height <= 900 && rect.width > 20 && textLength <= 1200) {
+                return candidate;
+            }
+        }
+
+        const sharedParent = labelElement.parentElement;
+        if (sharedParent && sharedParent.contains(mediaElement) && isElementVisible(sharedParent)) {
+            const rect = sharedParent.getBoundingClientRect();
+            if (rect.height <= 900 && rect.width > 20) {
+                return sharedParent;
+            }
+        }
+
+        return mediaElement;
+    }
+
+    function collectSampleContextText(labelElement, mediaElement) {
+        const lines = [];
+        const pushText = (text) => {
+            const normalized = normalizeQuestionSectionText(text);
+            if (!normalized || lines.includes(normalized)) return;
+            lines.push(normalized);
+        };
+
+        pushText(labelElement?.textContent);
+        getNextVisibleSiblings(labelElement, 4).forEach((element) => {
+            if (element === mediaElement || element.contains?.(mediaElement)) return;
+            pushText(element.textContent);
+        });
+        pushText(mediaElement?.textContent);
+
+        return lines.join('\n').slice(0, 320).trim();
+    }
+
+    async function collectLabeledMediaParts(questionElement, selector) {
+        const mediaParts = [];
+        let screenshotCount = 0;
+        const seenElements = new Set();
+        const labelCandidates = Array.from(questionElement.querySelectorAll('h1, h2, h3, h4, h5, h6, p, div, span, strong, label'))
+            .filter((element) => isSampleLabelElement(element));
+
+        for (const labelElement of labelCandidates) {
+            const mediaElement = resolveSampleCaptureElement(labelElement, questionElement);
+            if (!mediaElement) continue;
+
+            const captureElement = resolveSampleCaptureContainer(labelElement, mediaElement, questionElement);
+            if (!captureElement || seenElements.has(captureElement)) continue;
+
+            try {
+                const mediaLabel = normalizeQuestionSectionText(labelElement.textContent) || '样例区域';
+                const mediaContextText = collectSampleContextText(labelElement, mediaElement) || mediaLabel;
+                const screenshotDataUrl = await captureElementAsDataUrl(captureElement);
+                if (!screenshotDataUrl) continue;
+
+                seenElements.add(captureElement);
+                mediaParts.push({
+                    type: 'text',
+                    text: `下面这张截图对应的区域是“${mediaLabel}”。请优先按这张截图中的表头、列名、别名和结果格式理解这一小节。\n该区域关键信息：\n${mediaContextText}`
+                });
+                mediaParts.push({
+                    type: 'image_url',
+                    image_url: { url: screenshotDataUrl }
+                });
+                screenshotCount += 1;
+                appendInputLog(`已提取带标题的样例区域截图：${selector}，标签：${mediaLabel}`);
+            } catch (error) {
+                appendInputLog(`样例区域截图失败：${selector}，${error.message}`);
+            }
+        }
+
+        return {
+            mediaParts,
+            screenshotCount
+        };
+    }
+
     function copyComputedStyles(sourceNode, targetNode) {
         if (!(sourceNode instanceof Element) || !(targetNode instanceof Element)) return;
 
@@ -344,7 +573,7 @@
         return canvas.toDataURL('image/png');
     }
 
-    async function collectQuestionMediaParts(questionElement, selector, seenUrls) {
+    async function collectQuestionMediaParts(questionElement, selector, sectionEntries = []) {
         const mediaParts = [];
         let imageCount = 0;
         let screenshotCount = 0;
@@ -353,16 +582,28 @@
         const shouldUseScreenshot = images.length > 0 || elementNeedsScreenshotFallback(questionElement);
         imageCount = images.length;
 
-        if (shouldUseScreenshot && questionElement) {
+        const labeledMediaResult = await collectLabeledMediaParts(questionElement, selector);
+        if (labeledMediaResult.mediaParts.length > 0) {
+            mediaParts.push(...labeledMediaResult.mediaParts);
+            screenshotCount += labeledMediaResult.screenshotCount;
+        }
+
+        if (shouldUseScreenshot && questionElement && labeledMediaResult.mediaParts.length === 0) {
             try {
+                const mediaLabel = inferMediaLabelFromSections(sectionEntries);
+                const mediaContextText = buildMediaContextText(sectionEntries, mediaLabel);
                 const screenshotDataUrl = await captureElementAsDataUrl(questionElement);
                 if (screenshotDataUrl) {
+                    mediaParts.push({
+                        type: 'text',
+                        text: `下面这张题面截图对应的区域是“${mediaLabel}”。请将截图内容与这一小节绑定理解，不要和其它表或样例混淆。\n该区域关键信息：\n${mediaContextText}`
+                    });
                     mediaParts.push({
                         type: 'image_url',
                         image_url: { url: screenshotDataUrl }
                     });
                     screenshotCount += 1;
-                    appendInputLog(`检测到题面图片/图形内容，已改为区域截图：${selector}`);
+                    appendInputLog(`检测到题面图片/图形内容，已改为区域截图：${selector}，上下文标签：${mediaLabel}`);
                 }
             } catch (error) {
                 appendInputLog(`题面区域截图失败：${selector}，${error.message}`);
@@ -418,9 +659,10 @@
                 continue;
             }
 
-            orderedEntries.push(...extractOrderedQuestionSections(questionElement));
+            const sectionEntries = extractOrderedQuestionSections(questionElement);
+            orderedEntries.push(...sectionEntries);
 
-            const mediaResult = await collectQuestionMediaParts(questionElement, selector);
+            const mediaResult = await collectQuestionMediaParts(questionElement, selector, sectionEntries);
             mediaParts.push(...mediaResult.mediaParts);
             imageCount += mediaResult.imageCount;
             screenshotCount += mediaResult.screenshotCount;
@@ -434,7 +676,8 @@
             mediaParts,
             imageCount,
             screenshotCount,
-            fallbackBlockCount: fallbackBlocks.length
+            fallbackBlockCount: fallbackBlocks.length,
+            outputHeaderHints: extractOutputHeaderHints(mergeOrderedQuestionEntries(orderedEntries))
         };
     }
 
@@ -1189,6 +1432,7 @@ function createControlPanel() {
                 <div class="pta-section">
                     <div class="pta-section__title">手动模式</div>
                     <div class="pta-button-grid">
+                        <button id="refreshQuestionPreview" class="pta-button--accent" type="button">刷新题面内容</button>
                         <button id="manualClearQuestion" class="pta-button" type="button">清空题目区域</button>
                         <button id="copyQuestionPreview" class="pta-button--accent" type="button">复制题面内容</button>
                         <button id="manualSimulateInput" class="pta-button--primary" type="button">粘贴内容并输入</button>
@@ -1241,6 +1485,7 @@ function createControlPanel() {
     panel.querySelector('#startAutoAnswer').addEventListener('click', executeAutoAnswer);
     panel.querySelector('#toggleFullAutoAnswer').addEventListener('click', toggleFullAutoAnswer);
     panel.querySelector('#manualSimulateInput').addEventListener('click', executeManualInput);
+    panel.querySelector('#refreshQuestionPreview').addEventListener('click', refreshManualQuestionPreview);
     panel.querySelector('#copyQuestionPreview').addEventListener('click', copyQuestionPreviewText);
     panel.querySelector('#switchAutoMode').addEventListener('click', () => setPanelMode('auto'));
     panel.querySelector('#switchManualMode').addEventListener('click', () => setPanelMode('manual'));
@@ -1420,6 +1665,7 @@ async function updateMergedQuestionText() {
 
     async function copyQuestionPreviewText() {
         const status = document.querySelector('#status');
+        await refreshManualQuestionPreview();
         const text = (lastMergedQuestionText || '').trim();
 
         if (!text) {
@@ -2712,6 +2958,18 @@ async function updateMergedQuestionText() {
         throw new Error(`输入校验后仍与目标答案不一致。当前内容：${actualText}`);
     }
 
+    async function performTypingAttempt(editableTarget, preparedText, status, attempt) {
+        appendInputLog(`开始第 ${attempt} 次输入尝试`);
+        editableTarget.focus();
+        await sleep(50);
+        clearInputElement(editableTarget);
+        appendInputLog('已清空输入框内容');
+        await sleep(50);
+        status.textContent = `正在严格模拟键盘输入答案（第 ${attempt} 次）...`;
+        await typeAnswerCharacter(editableTarget, preparedText, 0, status);
+        verifyTypedResult(editableTarget, preparedText, status);
+    }
+
     async function simulateTypingAnswer(inputElement, text, status) {
         const editableTarget = resolveEditableTarget(inputElement);
         if (!editableTarget) {
@@ -2723,14 +2981,22 @@ async function updateMergedQuestionText() {
         appendInputLog('--- 开始答案填充阶段 ---');
         appendInputLog(`开始输入答案，目标总长度 ${preparedText.length}`);
         appendInputLog('当前输入模式：原始 DOM 连续输入');
-        editableTarget.focus();
-        await sleep(50);
-        clearInputElement(editableTarget);
-        appendInputLog('已清空输入框内容');
-        await sleep(50);
-        status.textContent = '正在严格模拟键盘输入答案...';
-        await typeAnswerCharacter(editableTarget, preparedText, 0, status);
-        verifyTypedResult(editableTarget, preparedText, status);
+
+        try {
+            await performTypingAttempt(editableTarget, preparedText, status, 1);
+        } catch (firstError) {
+            appendInputLog(`首次输入校验失败，准备自动重试一次：${firstError.message}`);
+            status.textContent = '首次输入校验失败，正在自动重试...';
+            await sleep(120);
+
+            try {
+                await performTypingAttempt(editableTarget, preparedText, status, 2);
+                appendInputLog('第二次输入校验通过，继续后续提交流程');
+            } catch (secondError) {
+                appendInputLog(`第二次输入校验仍失败：${secondError.message}`);
+                throw secondError;
+            }
+        }
     }
 
 // 修改等待元素加载的函数，增加超时时间
@@ -2832,9 +3098,33 @@ async function updateMergedQuestionText() {
         updateAiAnswerPreview('');
     }
 
+    async function advanceToNextQuestion(status, reason = '') {
+        const previousProblemKey = getCurrentProblemKey();
+        const nextButton = await waitForActionButton('下一题', 5000);
+
+        if (!nextButton) {
+            appendInputLog(`未找到“下一题”按钮，无法跳过当前题${reason ? `：${reason}` : ''}`);
+            status.textContent = '无法跳过当前题：未找到下一题按钮';
+            return { advanced: false };
+        }
+
+        triggerElementClick(nextButton);
+        appendInputLog(`已触发“下一题”按钮${reason ? `，原因：${reason}` : ''}`);
+
+        const nextProblemKey = await waitForProblemSwitch(previousProblemKey, 8000);
+        if (nextProblemKey) {
+            resetAfterProblemSwitch();
+            status.textContent = reason ? `已跳过当前题并切换到下一题：${reason}` : '已切换到下一题';
+            return { advanced: true };
+        }
+
+        appendInputLog('点击“下一题”后未检测到题目标识变化，跳题失败');
+        status.textContent = '已点击下一题，但未确认题目是否切换成功';
+        return { advanced: false };
+    }
+
     async function autoSubmitAndAdvance(status) {
         appendInputLog('开始自动执行提交、本题确认和下一题流程');
-        const previousProblemKey = getCurrentProblemKey();
 
         const submitButton = await waitForActionButton('提交本题', 3000);
         if (!submitButton) {
@@ -2855,26 +3145,18 @@ async function updateMergedQuestionText() {
         }
 
         await sleep(500);
-        const nextButton = await waitForActionButton('下一题', 5000);
-        if (!nextButton) {
-            appendInputLog('未找到“下一题”按钮，自动流程结束在当前题');
+        const nextResult = await advanceToNextQuestion(status);
+        if (!nextResult.advanced) {
+            appendInputLog('未找到“下一题”按钮或未检测到题目切换，自动流程结束在当前题');
+            if (status.textContent === '已点击下一题，但未确认题目是否切换成功') {
+                return { submitted: true, advanced: false };
+            }
             status.textContent = '答案已提交，但未找到下一题按钮';
             return { submitted: true, advanced: false };
         }
 
-        triggerElementClick(nextButton);
-        appendInputLog('已触发“下一题”按钮');
-
-        const nextProblemKey = await waitForProblemSwitch(previousProblemKey, 8000);
-        if (nextProblemKey) {
-            resetAfterProblemSwitch();
-            status.textContent = '已自动提交并切换到下一题';
-            return { submitted: true, advanced: true };
-        } else {
-            appendInputLog('点击“下一题”后未检测到题目标识变化，未执行清空旧答案');
-            status.textContent = '已点击下一题，但未确认题目是否切换成功';
-            return { submitted: true, advanced: false };
-        }
+        status.textContent = '已自动提交并切换到下一题';
+        return { submitted: true, advanced: true };
     }
 
     async function runAutoAnswerRound(options = {}) {
@@ -2983,7 +3265,24 @@ async function updateMergedQuestionText() {
             return { success: false, advanced: false };
         }
 
-        await simulateTypingAnswer(codeInputElement, parsedAnswer.code, status);
+        try {
+            await simulateTypingAnswer(codeInputElement, parsedAnswer.code, status);
+        } catch (typingError) {
+            appendInputLog(`输入两次仍失败，准备跳过当前题：${typingError.message}`);
+            status.textContent = '输入两次仍失败，正在跳过当前题...';
+            const skipResult = await advanceToNextQuestion(status, '输入校验连续失败');
+
+            if (!skipResult.advanced) {
+                appendInputLog('跳过当前题失败，自动流程停止');
+                return { success: false, advanced: false };
+            }
+
+            appendInputLog('当前题已跳过，继续后续流程');
+            return {
+                success: true,
+                advanced: true
+            };
+        }
 
         const submitResult = await autoSubmitAndAdvance(status);
 
