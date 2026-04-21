@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         编程题目自动答题助手（多区域支持版）
 // @namespace    http://tampermonkey.net/
-// @version      0.4
+// @version      1.0
 // @description  支持多题目区域+API配置的自动答题脚本（悬浮框美化版）
 // @author       你
 // @match        https://pintia.cn/problem-sets/*
@@ -23,6 +23,7 @@
     let enableThinking = GM_getValue('enableThinking') === true || GM_getValue('enableThinking') === 'true';
     let panelPosition = GM_getValue('panelPosition') ? JSON.parse(GM_getValue('panelPosition')) : { top: 20, right: 20 };
     let panelMode = GM_getValue('panelMode') || 'auto';
+    let apiConfigCollapsed = GM_getValue('apiConfigCollapsed') === true || GM_getValue('apiConfigCollapsed') === 'true';
     let panel = null; // 操作面板全局引用
     let inputLogs = [];
     let lastMergedQuestionText = '';
@@ -33,6 +34,7 @@
     function buildSystemPrompt(language) {
         const promptMap = {
             C: '你是解题助手。输出可直接提交的C语言代码。',
+            'C++': '你是解题助手。输出可直接提交的C++代码。',
             Java: '你是解题助手。输出可直接提交的Java代码。',
             Python: '你是解题助手。输出可直接提交的Python代码。',
             SQL: '你是解题助手。输出可直接提交的SQL答案。'
@@ -1130,7 +1132,7 @@
         style.textContent = `
             .pta-panel {
                 position: fixed;
-                width: min(460px, calc(100vw - 24px));
+                width: min(620px, calc(100vw - 24px));
                 height: min(760px, calc(100vh - 24px));
                 max-height: calc(100vh - 24px);
                 padding: 0;
@@ -1186,6 +1188,9 @@
                 background: rgba(255,255,255,0.72);
                 border: 1px solid rgba(226, 232, 240, 0.9);
                 border-radius: 14px;
+            }
+            .pta-section.is-collapsed .pta-section__content {
+                display: none;
             }
             .pta-section__title {
                 margin: 0 0 10px;
@@ -1256,13 +1261,48 @@
                 background: #eff6ff;
                 border: 1px solid #bfdbfe;
             }
+            .pta-button--success {
+                color: #fff;
+                background: linear-gradient(135deg, #16a34a, #15803d);
+                border: none;
+                box-shadow: 0 10px 24px rgba(22, 163, 74, 0.22);
+            }
+            .pta-button--warning {
+                color: #fff;
+                background: linear-gradient(135deg, #ea580c, #c2410c);
+                border: none;
+                box-shadow: 0 10px 24px rgba(234, 88, 12, 0.22);
+            }
             .pta-button:hover,
             .pta-button--primary:hover,
-            .pta-button--accent:hover {
+            .pta-button--accent:hover,
+            .pta-button--success:hover,
+            .pta-button--warning:hover {
                 transform: translateY(-1px);
             }
             .pta-button--full {
                 width: 100%;
+            }
+            .pta-action-stack {
+                display: grid;
+                grid-template-columns: 1fr;
+                gap: 10px;
+            }
+            .pta-action-button {
+                width: 100%;
+                padding: 12px 16px;
+                font-size: 14px;
+                border-radius: 13px;
+            }
+            .pta-auto-note {
+                margin-bottom: 12px;
+                padding: 10px 12px;
+                border-radius: 12px;
+                background: linear-gradient(135deg, #eff6ff, #f8fafc);
+                border: 1px solid #dbeafe;
+                color: #334155;
+                font-size: 12px;
+                line-height: 1.6;
             }
             .pta-status {
                 min-height: 42px;
@@ -1300,6 +1340,11 @@
                 color: #334155;
                 font-size: 12px;
                 cursor: pointer;
+            }
+            .pta-mini-button.is-active {
+                background: linear-gradient(135deg, #dbeafe, #eff6ff);
+                color: #1d4ed8;
+                border-color: rgba(59, 130, 246, 0.35);
             }
             .pta-actions {
                 display: flex;
@@ -1376,47 +1421,51 @@ function createControlPanel() {
         </div>
         <div class="pta-panel__body">
             <div id="autoModeView" class="pta-view">
-                <div class="pta-section">
-                    <div class="pta-section__title">API 配置</div>
-                    <div class="pta-field">
-                        <label for="apiUrlInput" class="pta-label">API 地址</label>
-                        <input type="text" id="apiUrlInput" class="pta-input" placeholder="输入 API 请求地址" value="${apiUrl}">
+                <div id="apiConfigSection" class="pta-section${apiConfigCollapsed ? ' is-collapsed' : ''}">
+                    <div class="pta-section__title">
+                        <span>API 配置</span>
+                        <button id="toggleApiConfig" class="pta-mini-button${apiConfigCollapsed ? '' : ' is-active'}" type="button">${apiConfigCollapsed ? '展开配置' : '折叠配置'}</button>
                     </div>
-                    <div class="pta-field">
-                        <label for="apiKeyInput" class="pta-label">API Key</label>
-                        <input type="password" id="apiKeyInput" class="pta-input" placeholder="输入 API 密钥" value="${apiKey}">
+                    <div class="pta-section__content">
+                        <div class="pta-field">
+                            <label for="apiUrlInput" class="pta-label">API 地址</label>
+                            <input type="text" id="apiUrlInput" class="pta-input" placeholder="输入 API 请求地址" value="${apiUrl}">
+                        </div>
+                        <div class="pta-field">
+                            <label for="apiKeyInput" class="pta-label">API Key</label>
+                            <input type="password" id="apiKeyInput" class="pta-input" placeholder="输入 API 密钥" value="${apiKey}">
+                        </div>
+                        <div class="pta-field">
+                            <label for="apiModelInput" class="pta-label">模型名称</label>
+                            <input type="text" id="apiModelInput" class="pta-input" placeholder="输入模型名称" value="${apiModel}">
+                        </div>
+                        <div class="pta-field">
+                            <label class="pta-label" for="enableThinkingInput">深度思考（百炼兼容协议）</label>
+                            <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#334155;">
+                                <input type="checkbox" id="enableThinkingInput" ${enableThinking ? 'checked' : ''}>
+                                开启深度思考（未勾选时显式关闭）
+                            </label>
+                        </div>
+                        <div class="pta-field">
+                            <label for="languageSelect" class="pta-label">选择编程语言</label>
+                            <select id="languageSelect" class="pta-select">
+                                <option value="C" ${selectedLanguage === 'C' ? 'selected' : ''}>C</option>
+                                <option value="C++" ${selectedLanguage === 'C++' ? 'selected' : ''}>C++</option>
+                                <option value="Java" ${selectedLanguage === 'Java' ? 'selected' : ''}>Java</option>
+                                <option value="Python" ${selectedLanguage === 'Python' ? 'selected' : ''}>Python</option>
+                                <option value="SQL" ${selectedLanguage === 'SQL' ? 'selected' : ''}>SQL</option>
+                            </select>
+                        </div>
+                        <button id="saveApiConfig" class="pta-button--primary pta-button--full" type="button">保存 API 配置</button>
                     </div>
-                    <div class="pta-field">
-                        <label for="apiModelInput" class="pta-label">模型名称</label>
-                        <input type="text" id="apiModelInput" class="pta-input" placeholder="输入模型名称" value="${apiModel}">
-                    </div>
-                    <div class="pta-field">
-                        <label class="pta-label" for="enableThinkingInput">深度思考（百炼兼容协议）</label>
-                        <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#334155;">
-                            <input type="checkbox" id="enableThinkingInput" ${enableThinking ? 'checked' : ''}>
-                            开启深度思考（未勾选时显式关闭）
-                        </label>
-                    </div>
-                    <div class="pta-field">
-                        <label for="languageSelect" class="pta-label">选择编程语言</label>
-                        <select id="languageSelect" class="pta-select">
-                            <option value="C" ${selectedLanguage === 'C' ? 'selected' : ''}>C</option>
-                            <option value="Java" ${selectedLanguage === 'Java' ? 'selected' : ''}>Java</option>
-                            <option value="Python" ${selectedLanguage === 'Python' ? 'selected' : ''}>Python</option>
-                            <option value="SQL" ${selectedLanguage === 'SQL' ? 'selected' : ''}>SQL</option>
-                        </select>
-                    </div>
-                    <button id="saveApiConfig" class="pta-button--primary pta-button--full" type="button">保存 API 配置</button>
                 </div>
 
                 <div class="pta-section">
                     <div class="pta-section__title">区域配置</div>
-                    <div class="pta-button-grid">
-                        <button id="autoDetectQuestion" class="pta-button--accent" type="button">自动提取题目</button>
-                        <button id="clearQuestions" class="pta-button" type="button">清空题目区域</button>
-                        <button id="autoDetectInput" class="pta-button--accent" type="button">自动识别输入框</button>
-                        <button id="startAutoAnswer" class="pta-button--primary" type="button">开始自动答题</button>
-                        <button id="toggleFullAutoAnswer" class="pta-button--primary" type="button">开启全自动答题</button>
+                    <div class="pta-auto-note">题目区域提取与输入框识别会在开始答题时自动执行，无需手动操作。</div>
+                    <div class="pta-action-stack">
+                        <button id="startAutoAnswer" class="pta-button--success pta-action-button" type="button">开始自动答题</button>
+                        <button id="toggleFullAutoAnswer" class="pta-button--warning pta-action-button" type="button">开启全自动答题</button>
                     </div>
                 </div>
 
@@ -1480,8 +1529,6 @@ function createControlPanel() {
         document.querySelector('#status').textContent = `配置保存成功！模型：${apiModel}，语言：${selectedLanguage}，深度思考：${enableThinking ? '开' : '关'}`;
     });
 
-    panel.querySelector('#autoDetectQuestion').addEventListener('click', applyAutoDetectedQuestions);
-    panel.querySelector('#autoDetectInput').addEventListener('click', applyAutoDetectedInput);
     panel.querySelector('#startAutoAnswer').addEventListener('click', executeAutoAnswer);
     panel.querySelector('#toggleFullAutoAnswer').addEventListener('click', toggleFullAutoAnswer);
     panel.querySelector('#manualSimulateInput').addEventListener('click', executeManualInput);
@@ -1496,14 +1543,24 @@ function createControlPanel() {
         toggleButton.textContent = collapsed ? '展开日志' : '折叠日志';
     });
 
+    panel.querySelector('#toggleApiConfig').addEventListener('click', () => {
+        apiConfigCollapsed = !apiConfigCollapsed;
+        GM_setValue('apiConfigCollapsed', apiConfigCollapsed);
+        const section = panel.querySelector('#apiConfigSection');
+        const button = panel.querySelector('#toggleApiConfig');
+        section?.classList.toggle('is-collapsed', apiConfigCollapsed);
+        button?.classList.toggle('is-active', !apiConfigCollapsed);
+        if (button) {
+            button.textContent = apiConfigCollapsed ? '展开配置' : '折叠配置';
+        }
+    });
+
     const clearQuestionSelection = () => {
         questionSelectors = [];
         GM_setValue('questionSelectors', JSON.stringify(questionSelectors));
         document.querySelector('#status').textContent = '已清空所有题目区域选择器';
         updateMergedQuestionText();
     };
-
-    panel.querySelector('#clearQuestions').addEventListener('click', clearQuestionSelection);
     panel.querySelector('#manualClearQuestion').addEventListener('click', clearQuestionSelection);
 
     const dragHandle = panel.querySelector('#dragHandle');
@@ -3123,7 +3180,10 @@ async function updateMergedQuestionText() {
         return { advanced: false };
     }
 
-    async function autoSubmitAndAdvance(status) {
+    async function autoSubmitAndAdvance(status, options = {}) {
+        const {
+            advanceAfterSubmit = true
+        } = options;
         appendInputLog('开始自动执行提交、本题确认和下一题流程');
 
         const submitButton = await waitForActionButton('提交本题', 3000);
@@ -3144,6 +3204,12 @@ async function updateMergedQuestionText() {
             appendInputLog('5 秒内未出现“确认”按钮，继续尝试下一题');
         }
 
+        if (!advanceAfterSubmit) {
+            appendInputLog('当前为单次自动答题，提交后停留在本题结果界面');
+            status.textContent = '已自动提交本题，当前停留在提交结果界面';
+            return { submitted: true, advanced: false };
+        }
+
         await sleep(500);
         const nextResult = await advanceToNextQuestion(status);
         if (!nextResult.advanced) {
@@ -3162,7 +3228,8 @@ async function updateMergedQuestionText() {
     async function runAutoAnswerRound(options = {}) {
     const {
         clearLogs = true,
-        forceRefreshSelectors = false
+        forceRefreshSelectors = false,
+        advanceAfterSubmit = true
     } = options;
     const status = document.querySelector('#status');
     if (clearLogs) {
@@ -3284,7 +3351,9 @@ async function updateMergedQuestionText() {
             };
         }
 
-        const submitResult = await autoSubmitAndAdvance(status);
+        const submitResult = await autoSubmitAndAdvance(status, {
+            advanceAfterSubmit
+        });
 
         appendInputLog('自动答题流程结束');
         if (status.textContent === '正在严格模拟键盘输入答案...' || status.textContent.startsWith('答案已输入')) {
@@ -3306,7 +3375,8 @@ async function updateMergedQuestionText() {
     async function executeAutoAnswer() {
         return runAutoAnswerRound({
             clearLogs: true,
-            forceRefreshSelectors: false
+            forceRefreshSelectors: false,
+            advanceAfterSubmit: false
         });
     }
 
@@ -3341,7 +3411,8 @@ async function updateMergedQuestionText() {
 
             const result = await runAutoAnswerRound({
                 clearLogs: false,
-                forceRefreshSelectors: true
+                forceRefreshSelectors: true,
+                advanceAfterSubmit: true
             });
 
             if (!isAutoRunning) {
