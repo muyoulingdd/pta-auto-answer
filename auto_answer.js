@@ -1263,15 +1263,15 @@
             }
             .pta-button--success {
                 color: #fff;
-                background: linear-gradient(135deg, #16a34a, #15803d);
+                background: linear-gradient(135deg, #2563eb, #1d4ed8);
                 border: none;
-                box-shadow: 0 10px 24px rgba(22, 163, 74, 0.22);
+                box-shadow: 0 10px 24px rgba(37, 99, 235, 0.22);
             }
             .pta-button--warning {
                 color: #fff;
-                background: linear-gradient(135deg, #ea580c, #c2410c);
+                background: linear-gradient(135deg, #f97316, #ef4444 52%, #ec4899);
                 border: none;
-                box-shadow: 0 10px 24px rgba(234, 88, 12, 0.22);
+                box-shadow: 0 10px 24px rgba(239, 68, 68, 0.24);
             }
             .pta-button:hover,
             .pta-button--primary:hover,
@@ -1464,8 +1464,8 @@ function createControlPanel() {
                     <div class="pta-section__title">区域配置</div>
                     <div class="pta-auto-note">题目区域提取与输入框识别会在开始答题时自动执行，无需手动操作。</div>
                     <div class="pta-action-stack">
-                        <button id="startAutoAnswer" class="pta-button--success pta-action-button" type="button">开始自动答题</button>
-                        <button id="toggleFullAutoAnswer" class="pta-button--warning pta-action-button" type="button">开启全自动答题</button>
+                        <button id="startAutoAnswer" class="pta-button--success pta-action-button" type="button">单次答题</button>
+                        <button id="toggleFullAutoAnswer" class="pta-button--warning pta-action-button" type="button">全自动答题</button>
                     </div>
                 </div>
 
@@ -3194,7 +3194,13 @@ async function updateMergedQuestionText() {
 
         triggerElementClick(submitButton);
         appendInputLog('已触发“提交本题”按钮');
-        status.textContent = '已提交本题，等待确认...';
+        status.textContent = '已触发提交，本题停留在提交界面...';
+
+        if (!advanceAfterSubmit) {
+            appendInputLog('当前为单次自动答题，提交触发后停留在提交界面');
+            status.textContent = '已触发提交，当前停留在提交界面';
+            return { submitted: true, advanced: false };
+        }
 
         const confirmButton = await waitForActionButton('确认', 5000);
         if (confirmButton) {
@@ -3202,12 +3208,6 @@ async function updateMergedQuestionText() {
             appendInputLog('已触发“确认”按钮');
         } else {
             appendInputLog('5 秒内未出现“确认”按钮，继续尝试下一题');
-        }
-
-        if (!advanceAfterSubmit) {
-            appendInputLog('当前为单次自动答题，提交后停留在本题结果界面');
-            status.textContent = '已自动提交本题，当前停留在提交结果界面';
-            return { submitted: true, advanced: false };
         }
 
         await sleep(500);
