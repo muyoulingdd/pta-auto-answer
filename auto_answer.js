@@ -132,6 +132,20 @@
             .trim();
     }
 
+    function normalizeValidationText(text) {
+        return (text || '')
+            .replace(/\r\n/g, '\n')
+            .replace(/\r/g, '\n')
+            .replace(/[ \t]+\n/g, '\n')
+            .replace(/\n{3,}/g, '\n\n')
+            .trimEnd();
+    }
+
+    function isValidationMatch(actualText, expectedText) {
+        if (actualText === expectedText) return true;
+        return normalizeValidationText(actualText) === normalizeValidationText(expectedText);
+    }
+
     function sleep(ms) {
         return new Promise((resolve) => setTimeout(resolve, ms));
     }
@@ -2636,7 +2650,7 @@ async function updateMergedQuestionText() {
 
     async function reconcileTypedResult(element, expectedText, status) {
         let actualText = getEditorText(element);
-        if (actualText === expectedText) {
+        if (isValidationMatch(actualText, expectedText)) {
             appendInputLog('输入完成，校验通过，无需修正');
             return;
         }
@@ -2653,7 +2667,7 @@ async function updateMergedQuestionText() {
         }
 
         actualText = getEditorText(element);
-        if (actualText !== expectedText) {
+        if (!isValidationMatch(actualText, expectedText)) {
             const validatedRemovableOffsets = findValidatedRemovableOffsets(actualText, expectedText);
             if (validatedRemovableOffsets.length > 0) {
                 appendInputLog(`开始校验式删除冗余补全字符，共 ${validatedRemovableOffsets.length} 处`);
@@ -2671,7 +2685,7 @@ async function updateMergedQuestionText() {
             }
         }
 
-        if (actualText !== expectedText) {
+        if (!isValidationMatch(actualText, expectedText)) {
             const greedyRemovableOffsets = findGreedyRemovableOffsets(actualText, expectedText);
             if (greedyRemovableOffsets.length > 0) {
                 appendInputLog(`开始贪心删除冗余补全字符，共 ${greedyRemovableOffsets.length} 处`);
@@ -2689,7 +2703,7 @@ async function updateMergedQuestionText() {
             }
         }
 
-        if (actualText !== expectedText) {
+        if (!isValidationMatch(actualText, expectedText)) {
             const backwardRemovableOffsets = findBackwardRemovableOffsets(actualText, expectedText);
             if (backwardRemovableOffsets.length > 0) {
                 appendInputLog(`开始倒查删除多余自动补全字符，共 ${backwardRemovableOffsets.length} 处`);
@@ -2706,7 +2720,7 @@ async function updateMergedQuestionText() {
             }
         }
 
-        if (actualText !== expectedText) {
+        if (!isValidationMatch(actualText, expectedText)) {
             appendInputLog(`校验失败，当前内容与目标仍不一致。当前长度 ${actualText.length}`);
             appendInputLog(`期望内容：${JSON.stringify(expectedText)}`);
             appendInputLog(`实际内容：${JSON.stringify(actualText)}`);
@@ -2997,7 +3011,7 @@ async function updateMergedQuestionText() {
 
     function verifyTypedResult(element, expectedText, status) {
         const actualText = getEditorText(element);
-        if (actualText === expectedText) {
+        if (isValidationMatch(actualText, expectedText)) {
             appendInputLog('输入完成，校验通过，无需修正');
             return;
         }
